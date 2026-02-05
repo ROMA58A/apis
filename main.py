@@ -164,12 +164,11 @@ def crear_usuario(data: UsuarioCreate):
         cursor.close()
         conn.close()
 
-
 # =========================================
 # RUTAS: JÓVENES
 # =========================================
 @app.get("/jovenes")
-def listar_jovenes(current=Depends(get_current_user)):
+def listar_jovenes():
     conn = get_db()
     cursor = conn.cursor(dictionary=True)
     try:
@@ -180,7 +179,7 @@ def listar_jovenes(current=Depends(get_current_user)):
         conn.close()
 
 @app.post("/jovenes")
-def crear_joven(joven: Joven, current=Depends(get_current_user)):
+def crear_joven(joven: Joven):
     conn = get_db()
     cursor = conn.cursor()
     try:
@@ -198,7 +197,7 @@ def crear_joven(joven: Joven, current=Depends(get_current_user)):
 # RUTAS: ASISTENCIA
 # =========================================
 @app.post("/asistencia")
-def guardar_asistencia(data: Asistencia, current=Depends(get_current_user)):
+def guardar_asistencia(data: Asistencia):
     conn = get_db()
     cursor = conn.cursor()
     try:
@@ -223,7 +222,7 @@ def guardar_asistencia(data: Asistencia, current=Depends(get_current_user)):
 # RUTAS: FINANZAS
 # =========================================
 @app.get("/finanzas")
-def listar_finanzas(current=Depends(get_current_user)):
+def listar_finanzas():
     conn = get_db()
     cursor = conn.cursor(dictionary=True)
     try:
@@ -234,7 +233,7 @@ def listar_finanzas(current=Depends(get_current_user)):
         conn.close()
 
 @app.post("/finanzas")
-def crear_finanza(data: Finanza, current=Depends(get_current_user)):
+def crear_finanza(data: Finanza):
     conn = get_db()
     cursor = conn.cursor()
     try:
@@ -275,4 +274,4 @@ def root():
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
-    uvicorn.run(app, host="0.0.0.0", port=port) 
+    uvicorn.run(app, host="0.0.0.0", port=port)
