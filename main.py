@@ -1,4 +1,3 @@
-
 import os
 import mysql.connector
 from datetime import datetime, timedelta
@@ -109,24 +108,42 @@ class Finanza(BaseModel):
 # =========================================
 @app.post("/login")
 def login(data: LoginData):
+    """
+    Login simple sin token JWT: verifica usuario y contraseña.
+    """
     conn = get_db()
     cursor = conn.cursor(dictionary=True)
     try:
-        cursor.execute("SELECT id, password_hash, rol FROM usuarios WHERE usuario=%s", (data.usuario,))
+        # Buscar usuario en la base de datos
+        cursor.execute(
+            "SELECT id, password_hash, rol FROM usuarios WHERE usuario=%s",
+            (data.usuario,)
+        )
         user = cursor.fetchone()
-        
-        if not user or not verify_password(data.password, user["password_hash"]):
-            raise HTTPException(401, "Credenciales inválidas")
 
-        token = create_token({
-            "user_id": user["id"],
+        # Verificar si existe el usuario
+        if not user:
+            raise HTTPException(status_code=401, detail="Usuario no encontrado")
+
+        # Verificar contraseña
+        if not verify_password(data.password, user["password_hash"]):
+            raise HTTPException(status_code=401, detail="Contraseña incorrecta")
+
+        # Login correcto
+        return {
+            "success": True,
             "usuario": data.usuario,
-            "rol": user["rol"]
-        })
-        return {"access_token": token, "token_type": "bearer"}
+            "rol": user["rol"],
+            "message": "Login exitoso"
+        }
+
+    except mysql.connector.Error as e:
+        # Manejo de errores de base de datos
+        raise HTTPException(status_code=500, detail=f"Error de base de datos: {e}")
     finally:
         cursor.close()
         conn.close()
+
 
 @app.post("/usuarios")
 def crear_usuario(data: UsuarioCreate):
@@ -258,4 +275,4 @@ def root():
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    uvicorn.run(app, host="0.0.0.0", port=port) 
