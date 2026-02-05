@@ -13,7 +13,7 @@ from passlib.context import CryptContext
 import uvicorn
 
 # =========================================
-# CONFIGURACIÓN GENERAL
+# CONFIGURACIÓN GENERAL Y SEGURIDAD
 # =========================================
 SECRET_KEY = os.getenv("SECRET_KEY", "don_bosco_seguro_123")
 ALGORITHM = "HS256"
@@ -22,11 +22,14 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 60
 pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
-db_config = {
-    "host": os.getenv("MYSQL_HOST", "localhost"),
-    "user": os.getenv("MYSQL_USER", "root"),
-    "password": os.getenv("MYSQL_PASS", ""),
-    "database": os.getenv("MYSQL_DB", "don_bosco"),
+# Configuración de base de datos optimizada para Aiven/Nube
+DB_CONFIG = {
+    "host": os.getenv("MYSQL_HOST", "mysql-16529156-uped-419c.e.aivencloud.com"),
+    "user": os.getenv("MYSQL_USER", "avnadmin"),
+    "password": os.getenv("MYSQL_PASS", "AVNS_gbkKmZWVZapTrEspfyM"), # Se recomienda configurar en Render Env Vars
+    "port": int(os.getenv("MYSQL_PORT", 14086)),
+    "database": os.getenv("MYSQL_DB", "don_bosco_connect"),
+    "ssl_disabled": False # Aiven requiere SSL activo
 }
 
 app = FastAPI(title="Sistema Don Bosco API")
@@ -39,10 +42,15 @@ app.add_middleware(
 )
 
 # =========================================
-# UTILIDADES
+# UTILIDADES DE BASE DE DATOS Y SEGURIDAD
 # =========================================
 def get_db():
-    return mysql.connector.connect(**db_config)
+    try:
+        conn = mysql.connector.connect(**DB_CONFIG)
+        return conn
+    except mysql.connector.Error as err:
+        print(f"Error crítico de conexión: {err}")
+        raise HTTPException(status_code=500, detail="No se pudo conectar a la base de datos")
 
 def hash_password(pwd: str):
     return pwd_context.hash(pwd)
@@ -60,10 +68,10 @@ def get_current_user(token: str = Depends(oauth2_scheme)):
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         return payload
     except:
-        raise HTTPException(status_code=401, detail="Token inválido")
+        raise HTTPException(status_code=401, detail="Token inválido o expirado")
 
 # =========================================
-# MODELOS
+# MODELOS DE DATOS (PYDANTIC)
 # =========================================
 class UsuarioCreate(BaseModel):
     usuario: str
@@ -96,135 +104,134 @@ class Finanza(BaseModel):
     descripcion: str
 
 # =========================================
-# LOGIN / USUARIOS
+# RUTAS: LOGIN / USUARIOS
 # =========================================
 @app.post("/login")
 def login(data: LoginData):
     conn = get_db()
     cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute("SELECT id, password_hash, rol FROM usuarios WHERE usuario=%s", (data.usuario,))
+        user = cursor.fetchone()
+        
+        if not user or not verify_password(data.password, user["password_hash"]):
+            raise HTTPException(401, "Credenciales inválidas")
 
-    cursor.execute(
-        "SELECT id, password_hash, rol FROM usuarios WHERE usuario=%s",
-        (data.usuario,)
-    )
-    user = cursor.fetchone()
-    conn.close()
-
-    if not user or not verify_password(data.password, user["password_hash"]):
-        raise HTTPException(401, "Credenciales inválidas")
-
-    token = create_token({
-        "user_id": user["id"],
-        "usuario": data.usuario,
-        "rol": user["rol"]
-    })
-
-    return {"access_token": token, "token_type": "bearer"}
+        token = create_token({
+            "user_id": user["id"],
+            "usuario": data.usuario,
+            "rol": user["rol"]
+        })
+        return {"access_token": token, "token_type": "bearer"}
+    finally:
+        cursor.close()
+        conn.close()
 
 @app.post("/usuarios")
 def crear_usuario(data: UsuarioCreate, current=Depends(get_current_user)):
     conn = get_db()
     cursor = conn.cursor()
-
-    cursor.execute(
-        "INSERT INTO usuarios (usuario, password_hash, rol) VALUES (%s,%s,%s)",
-        (data.usuario, hash_password(data.password), data.rol)
-    )
-    conn.commit()
-    conn.close()
-
-    return {"success": True, "message": "Usuario creado"}
+    try:
+        cursor.execute(
+            "INSERT INTO usuarios (usuario, password_hash, rol) VALUES (%s,%s,%s)",
+            (data.usuario, hash_password(data.password), data.rol)
+        )
+        conn.commit()
+        return {"success": True, "message": "Usuario creado"}
+    finally:
+        cursor.close()
+        conn.close()
 
 # =========================================
-# JÓVENES
+# RUTAS: JÓVENES
 # =========================================
 @app.get("/jovenes")
 def listar_jovenes(current=Depends(get_current_user)):
     conn = get_db()
     cursor = conn.cursor(dictionary=True)
-
-    cursor.execute("SELECT * FROM jovenes ORDER BY nombre ASC")
-    data = cursor.fetchall()
-    conn.close()
-    return data
+    try:
+        cursor.execute("SELECT * FROM jovenes ORDER BY nombre ASC")
+        return cursor.fetchall()
+    finally:
+        cursor.close()
+        conn.close()
 
 @app.post("/jovenes")
 def crear_joven(joven: Joven, current=Depends(get_current_user)):
     conn = get_db()
     cursor = conn.cursor()
-
-    cursor.execute(
-        "INSERT INTO jovenes (nombre, whatsapp, edad, fecha_nacimiento) VALUES (%s,%s,%s,%s)",
-        (joven.nombre, joven.whatsapp, joven.edad, joven.fecha_nacimiento)
-    )
-    conn.commit()
-    conn.close()
-
-    return {"success": True}
+    try:
+        cursor.execute(
+            "INSERT INTO jovenes (nombre, whatsapp, edad, fecha_nacimiento) VALUES (%s,%s,%s,%s)",
+            (joven.nombre, joven.whatsapp, joven.edad, joven.fecha_nacimiento)
+        )
+        conn.commit()
+        return {"success": True}
+    finally:
+        cursor.close()
+        conn.close()
 
 # =========================================
-# ASISTENCIA
+# RUTAS: ASISTENCIA
 # =========================================
 @app.post("/asistencia")
 def guardar_asistencia(data: Asistencia, current=Depends(get_current_user)):
     conn = get_db()
     cursor = conn.cursor()
-
-    cursor.execute(
-        "INSERT INTO sesiones_martes (fecha, acta_reunion, total_asistentes) VALUES (CURDATE(), %s, %s)",
-        (data.acta, data.total_asistentes)
-    )
-    id_sesion = cursor.lastrowid
-
-    for a in data.asistencias:
+    try:
         cursor.execute(
-            "INSERT INTO asistencia_detalle (id_sesion, id_joven, asistio, motivo_falta) VALUES (%s,%s,%s,%s)",
-            (id_sesion, a.id_joven, a.asistio, a.motivo)
+            "INSERT INTO sesiones_martes (fecha, acta_reunion, total_asistentes) VALUES (CURDATE(), %s, %s)",
+            (data.acta, data.total_asistentes)
         )
+        id_sesion = cursor.lastrowid
 
-    conn.commit()
-    conn.close()
-
-    return {"success": True}
+        for a in data.asistencias:
+            cursor.execute(
+                "INSERT INTO asistencia_detalle (id_sesion, id_joven, asistio, motivo_falta) VALUES (%s,%s,%s,%s)",
+                (id_sesion, a.id_joven, a.asistio, a.motivo)
+            )
+        conn.commit()
+        return {"success": True}
+    finally:
+        cursor.close()
+        conn.close()
 
 # =========================================
-# FINANZAS
+# RUTAS: FINANZAS
 # =========================================
 @app.get("/finanzas")
 def listar_finanzas(current=Depends(get_current_user)):
     conn = get_db()
     cursor = conn.cursor(dictionary=True)
-
-    cursor.execute("SELECT * FROM finanzas ORDER BY fecha DESC")
-    data = cursor.fetchall()
-    conn.close()
-    return data
+    try:
+        cursor.execute("SELECT * FROM finanzas ORDER BY fecha DESC")
+        return cursor.fetchall()
+    finally:
+        cursor.close()
+        conn.close()
 
 @app.post("/finanzas")
 def crear_finanza(data: Finanza, current=Depends(get_current_user)):
     conn = get_db()
     cursor = conn.cursor()
-
-    cursor.execute(
-        "INSERT INTO finanzas (tipo, monto, descripcion) VALUES (%s,%s,%s)",
-        (data.tipo, data.monto, data.descripcion)
-    )
-    conn.commit()
-    conn.close()
-
-    return {"success": True}
+    try:
+        cursor.execute(
+            "INSERT INTO finanzas (tipo, monto, descripcion) VALUES (%s,%s,%s)",
+            (data.tipo, data.monto, data.descripcion)
+        )
+        conn.commit()
+        return {"success": True}
+    finally:
+        cursor.close()
+        conn.close()
 
 # =========================================
 # ROOT
 # =========================================
 @app.get("/")
 def root():
-    return {"message": "Sistema Don Bosco activo ✔"}
+    return {"status": "online", "message": "Sistema Don Bosco API activa ✔"}
 
-# =========================================
-# RUN
-# =========================================
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
-
