@@ -1,3 +1,4 @@
+
 import os
 import mysql.connector
 from datetime import datetime, timedelta
@@ -128,7 +129,11 @@ def login(data: LoginData):
         conn.close()
 
 @app.post("/usuarios")
-def crear_usuario(data: UsuarioCreate, current=Depends(get_current_user)):
+def crear_usuario(data: UsuarioCreate):
+    """
+    Crea un nuevo usuario sin necesidad de estar autenticado.
+    Útil para crear el primer usuario (admin inicial).
+    """
     conn = get_db()
     cursor = conn.cursor()
     try:
@@ -137,10 +142,11 @@ def crear_usuario(data: UsuarioCreate, current=Depends(get_current_user)):
             (data.usuario, hash_password(data.password), data.rol)
         )
         conn.commit()
-        return {"success": True, "message": "Usuario creado"}
+        return {"success": True, "message": f"Usuario '{data.usuario}' creado"}
     finally:
         cursor.close()
         conn.close()
+
 
 # =========================================
 # RUTAS: JÓVENES
@@ -228,9 +234,27 @@ def crear_finanza(data: Finanza, current=Depends(get_current_user)):
 # =========================================
 # ROOT
 # =========================================
+# =========================================
+# ROOT CON VERIFICACIÓN DE BASE DE DATOS
+# =========================================
 @app.get("/")
 def root():
-    return {"status": "online", "message": "Sistema Don Bosco API activa ✔"}
+    db_status = "Desconectada ❌"
+    try:
+        # Intentamos abrir una conexión rápida
+        conn = get_db()
+        if conn.is_connected():
+            db_status = "Conectada a Aiven ✅"
+        conn.close()
+    except Exception as e:
+        db_status = f"Error de conexión: {str(e)} ❌"
+
+    return {
+        "status": "online",
+        "database": db_status,
+        "message": "Sistema Don Bosco API activa ✔",
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    }
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
